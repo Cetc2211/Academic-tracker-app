@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   HelpCircle,
   ShieldCheck,
+  LogOut,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -54,6 +55,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import Image from 'next/image';
 import { auth } from '@/lib/firebase';
+import { useSignOut } from 'react-firebase-hooks/auth';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 
@@ -86,6 +88,7 @@ export default function MainLayoutClient({
   const pathname = usePathname();
   const router = useRouter();
   const { settings, activeGroup, activePartialId, isLoading: isDataLoading, error: dataError, user } = useData();
+  const [signOut, isSigningOut, signOutError] = useSignOut(auth);
   const { toast } = useToast();
   
   useEffect(() => {
@@ -103,7 +106,7 @@ export default function MainLayoutClient({
   }
   
   if (!user && !isDataLoading) {
-    router.replace('/dashboard');
+    router.replace('/login');
     return (
        <div className="flex h-screen w-full items-center justify-center">
             <Loader2 className="mr-2 h-8 w-8 animate-spin" />
@@ -113,6 +116,16 @@ export default function MainLayoutClient({
   }
   
   if (!user) return null;
+  
+  const handleSignOut = async () => {
+      const success = await signOut();
+      if(success) {
+          toast({ title: 'Sesión Cerrada', description: 'Has cerrado sesión exitosamente.' });
+          router.push('/login');
+      } else if (signOutError) {
+          toast({ variant: 'destructive', title: 'Error', description: 'No se pudo cerrar la sesión.'});
+      }
+    }
 
   const renderNavMenu = (items: typeof mainNavItems) => (
        <SidebarMenu>
@@ -232,6 +245,10 @@ export default function MainLayoutClient({
                         <DropdownMenuItem onSelect={() => router.push('/settings')}>
                             <Settings className="mr-2 h-4 w-4" />
                             <span>Ir a Ajustes</span>
+                        </DropdownMenuItem>
+                         <DropdownMenuItem onSelect={handleSignOut}>
+                            <LogOut className="mr-2 h-4 w-4" />
+                            <span>Cerrar Sesión</span>
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
