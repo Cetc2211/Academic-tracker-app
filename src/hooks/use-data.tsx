@@ -214,7 +214,7 @@ interface DataContextType {
   deleteGroup: (groupId: string) => Promise<void>;
   addStudentObservation: (observation: Omit<StudentObservation, 'id' | 'date' | 'followUpUpdates' | 'isClosed'>) => Promise<void>;
   updateStudentObservation: (studentId: string, observationId: string, updateText: string, isClosing: boolean) => Promise<void>;
-  calculateFinalGrade: (studentId: string, groupId: string, partialId: PartialId) => number;
+  calculateFinalGrade: (studentId: string) => number;
   calculateDetailedFinalGrade: (studentId: string, pData: PartialData, criteria: EvaluationCriteria[]) => { finalGrade: number, criteriaDetails: CriteriaDetail[], isRecovery: boolean };
   getStudentRiskLevel: (finalGrade: number, pAttendance: AttendanceRecord, studentId: string) => CalculatedRisk;
   fetchPartialData: (groupId: string, partialId: PartialId) => Promise<(PartialData & { criteria: EvaluationCriteria[] }) | null>;
@@ -225,25 +225,12 @@ interface DataContextType {
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
-// Define a mock user object
-const mockUser = {
-    uid: 'test-user-123',
-    displayName: 'Docente de Prueba',
-    email: 'test@example.com',
-    photoURL: '',
-    // Add any other properties your app might use from the user object
-} as User;
-
-
 // DATA PROVIDER COMPONENT
 export const DataProvider: React.FC<{children: React.ReactNode}> = ({ children }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
     
-    // TEMPORARY: Use a mock user instead of Firebase Auth
-    const user = mockUser;
-    const authLoading = false;
-    // const [user, authLoading] = useAuthState(auth);
+    const [user, authLoading] = useAuthState(auth);
 
     // Main State
     const [groups, setGroups] = useState<Group[]>([]);
@@ -270,29 +257,31 @@ export const DataProvider: React.FC<{children: React.ReactNode}> = ({ children }
 
     useEffect(() => {
         if (!authLoading) {
-            // Force user to be logged in for this temporary setup
-            const user = mockUser;
-            try {
-                setGroups(loadFromStorage('app_groups', []));
-                setAllStudents(loadFromStorage('app_students', []));
-                setAllObservations(loadFromStorage('app_observations', {}));
-                setAllPartialsData(loadFromStorage('app_partialsData', {}));
-                setSettingsState(loadFromStorage('app_settings', defaultSettings));
-                
-                const storedActiveGroupId = loadFromStorage('activeGroupId_v1', null);
-                const availableGroups = loadFromStorage('app_groups', []);
-                if(availableGroups.some((g: Group) => g.id === storedActiveGroupId)){
-                    setActiveGroupIdState(storedActiveGroupId);
-                } else if (availableGroups.length > 0) {
-                    setActiveGroupIdState(availableGroups[0].id);
+            if (user) {
+                try {
+                    setGroups(loadFromStorage('app_groups', []));
+                    setAllStudents(loadFromStorage('app_students', []));
+                    setAllObservations(loadFromStorage('app_observations', {}));
+                    setAllPartialsData(loadFromStorage('app_partialsData', {}));
+                    setSettingsState(loadFromStorage('app_settings', defaultSettings));
+                    
+                    const storedActiveGroupId = loadFromStorage('activeGroupId_v1', null);
+                    const availableGroups = loadFromStorage('app_groups', []);
+                    if(availableGroups.some((g: Group) => g.id === storedActiveGroupId)){
+                        setActiveGroupIdState(storedActiveGroupId);
+                    } else if (availableGroups.length > 0) {
+                        setActiveGroupIdState(availableGroups[0].id);
+                    }
+                } catch (e) {
+                    setError(e as Error);
+                } finally {
+                    setIsLoading(false);
                 }
-            } catch (e) {
-                setError(e as Error);
-            } finally {
-                setIsLoading(false);
+            } else {
+                 setIsLoading(false); // No user, stop loading
             }
         }
-    }, [loadFromStorage, authLoading]);
+    }, [user, loadFromStorage, authLoading]);
     
     // Derived State
     const activeGroup = useMemo(() => {
@@ -384,12 +373,10 @@ export const DataProvider: React.FC<{children: React.ReactNode}> = ({ children }
         return { finalGrade: grade, criteriaDetails: criteriaDetails, isRecovery: false };
     }, []);
 
-    const calculateFinalGrade = useCallback((studentId: string, groupId: string, partialId: PartialId): number => {
-        const group = groups.find(g => g.id === groupId);
-        const pData = allPartialsData[groupId]?.[partialId];
-        if (!group || !pData) return 0;
-        return calculateDetailedFinalGrade(studentId, pData, group.criteria).finalGrade;
-    }, [groups, allPartialsData, calculateDetailedFinalGrade]);
+    const calculateFinalGrade = useCallback((studentId: string): number => {
+        if (!activeGroup || !partialData) return 0;
+        return calculateDetailedFinalGrade(studentId, partialData, activeGroup.criteria).finalGrade;
+    }, [activeGroup, partialData, calculateDetailedFinalGrade]);
 
 
     const getStudentRiskLevel = useCallback((finalGrade: number, pAttendance: AttendanceRecord | undefined, studentId: string): CalculatedRisk => {
@@ -584,19 +571,22 @@ export const DataProvider: React.FC<{children: React.ReactNode}> = ({ children }
     }, []);
     
     const resetAllData = useCallback(async () => {
-        if(typeof window !== 'undefined') {
-            localStorage.clear();
+        if(typeof window !== 'undefined' && user) {
+            localStorage.removeItem(getStorageKey('app_groups'));
+            localStorage.removeItem(getStorageKey('app_students'));
+            localStorage.removeItem(getStorageKey('app_observations'));
+            localStorage.removeItem(getStorageKey('app_partialsData'));
+            localStorage.removeItem(getStorageKey('activeGroupId_v1'));
         }
         setGroups([]);
         setAllStudents([]);
         setAllObservations({});
         setAllPartialsData({});
-        setSettingsState(defaultSettings);
         setActiveGroupIdState(null);
         setActivePartialId('p1');
         window.location.reload();
         return Promise.resolve();
-    }, []);
+    }, [user, getStorageKey]);
 
     const createSetterForPartialData = useCallback(<T,>(field: keyof PartialData) => {
         return async (setter: React.SetStateAction<T>) => {
